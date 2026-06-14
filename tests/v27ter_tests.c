@@ -469,7 +469,7 @@ int main(int argc, char *argv[])
     else
     {
         /* We will generate V.27ter audio, and add some noise to it. */
-        tx = v27ter_tx_init(NULL, test_bps, tep, v27tergetbit, NULL);
+        tx = v27ter_tx_init(NULL, test_bps, tep, false, v27tergetbit, NULL);
         logging = v27ter_tx_get_logging_state(tx);
         span_log_set_level(logging, SPAN_LOG_SHOW_SEVERITY | SPAN_LOG_SHOW_PROTOCOL | SPAN_LOG_FLOW);
         span_log_set_tag(logging, "V.27ter-tx");
@@ -491,7 +491,7 @@ int main(int argc, char *argv[])
     }
     /*endif*/
 
-    rx = v27ter_rx_init(NULL, test_bps, v27terputbit, NULL);
+    rx = v27ter_rx_init(NULL, test_bps, 0, v27terputbit, NULL);
     logging = v27ter_rx_get_logging_state(rx);
     span_log_set_level(logging, SPAN_LOG_SHOW_SEVERITY | SPAN_LOG_SHOW_PROTOCOL | SPAN_LOG_FLOW);
     span_log_set_tag(logging, "V.27ter-rx");
@@ -564,9 +564,9 @@ int main(int argc, char *argv[])
                 /*endif*/
                 memset(&latest_results, 0, sizeof(latest_results));
                 signal_level--;
-                v27ter_tx_restart(tx, test_bps, tep);
+                v27ter_tx_restart(tx, test_bps, tep, false);
                 v27ter_tx_power(tx, signal_level);
-                v27ter_rx_restart(rx, test_bps, false);
+                v27ter_rx_restart(rx, test_bps, 0, false);
                 bert_init(&bert, bits_per_test, BERT_PATTERN_ITU_O152_11, test_bps, 20);
                 bert_set_report(&bert, 10000, reporter, NULL);
                 one_way_line_model_free(line_model);

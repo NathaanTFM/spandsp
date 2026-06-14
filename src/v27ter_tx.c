@@ -82,7 +82,7 @@
 /*! The start of training segment 1, in symbols */
 #define V27TER_TRAINING_SEG_1           0
 /*! The start of training segment 2, in symbols */
-#define V27TER_TRAINING_SEG_2           (V27TER_TRAINING_SEG_1 + 320)
+#define V27TER_TRAINING_SEG_2           (V27TER_TRAINING_SEG_1 + 304)
 /*! The start of training segment 3, in symbols */
 #define V27TER_TRAINING_SEG_3           (V27TER_TRAINING_SEG_2 + 32)
 /*! The start of training segment 4, in symbols */
@@ -93,6 +93,15 @@
 #define V27TER_TRAINING_END             (V27TER_TRAINING_SEG_5 + 8)
 /*! The end of the shutdown sequence, in symbols */
 #define V27TER_TRAINING_SHUTDOWN_END    (V27TER_TRAINING_END + 32)
+
+/* Segments of the short training sequence */
+#define V27TER_TRAINING_SHORT_SEG_1         0
+#define V27TER_TRAINING_SHORT_SEG_2         (V27TER_TRAINING_SHORT_SEG_1 + 0)
+#define V27TER_TRAINING_SHORT_SEG_3         (V27TER_TRAINING_SHORT_SEG_2 + 0)
+#define V27TER_TRAINING_SHORT_SEG_4         (V27TER_TRAINING_SHORT_SEG_3 + 14)
+#define V27TER_TRAINING_SHORT_SEG_5         (V27TER_TRAINING_SHORT_SEG_4 + 58)
+#define V27TER_TRAINING_SHORT_END           (V27TER_TRAINING_SHORT_SEG_5 + 8)
+#define V27TER_TRAINING_SHORT_SHUTDOWN_END  (V27TER_TRAINING_SHORT_END + 32)
 
 static int fake_get_bit(void *user_data)
 {
@@ -181,17 +190,17 @@ static complexf_t getbaud(v27ter_tx_state_t *s)
     if (s->in_training)
     {
         /* Send the training sequence */
-        if (++s->training_step <= V27TER_TRAINING_SEG_5)
+        if (++s->training_step <= (s->short_train ? V27TER_TRAINING_SHORT_SEG_5 : V27TER_TRAINING_SEG_5))
         {
-            if (s->training_step <= V27TER_TRAINING_SEG_4)
+            if (s->training_step <= (s->short_train ? V27TER_TRAINING_SHORT_SEG_4 : V27TER_TRAINING_SEG_4))
             {
-                if (s->training_step <= V27TER_TRAINING_SEG_2)
+                if (s->training_step <= (s->short_train ? V27TER_TRAINING_SHORT_SEG_2 : V27TER_TRAINING_SEG_2))
                 {
                     /* Segment 1: Unmodulated carrier (talker echo protection) */
                     return constellation[0];
                 }
                 /*endif*/
-                if (s->training_step <= V27TER_TRAINING_SEG_3)
+                if (s->training_step <= (s->short_train ? V27TER_TRAINING_SHORT_SEG_3 : V27TER_TRAINING_SEG_3))
                 {
                     /* Segment 2: Silence */
                     return zero;
@@ -216,7 +225,7 @@ static complexf_t getbaud(v27ter_tx_state_t *s)
         /* There is no graceful shutdown procedure defined for V.27ter. Just
            send some ones, to ensure we get the real data bits through, even
            with bad ISI. */
-        if (s->training_step == V27TER_TRAINING_END + 1)
+        if (s->training_step == (s->short_train ? V27TER_TRAINING_SHORT_END : V27TER_TRAINING_END) + 1)
         {
             /* End of the last segment - segment 5: All ones */
             /* Switch from the fake get_bit routine, to the user supplied real
@@ -225,8 +234,10 @@ static complexf_t getbaud(v27ter_tx_state_t *s)
             s->in_training = false;
         }
         /*endif*/
-        if (s->training_step == V27TER_TRAINING_SHUTDOWN_END)
+        if (s->training_step == (s->short_train ? V27TER_TRAINING_SHORT_SHUTDOWN_END : V27TER_TRAINING_SHUTDOWN_END))
         {
+            s->is_shutdown = true;
+
             if (s->status_handler)
                 s->status_handler(s->status_user_data, SIG_STATUS_SHUTDOWN_COMPLETE);
             /*endif*/
@@ -269,7 +280,7 @@ SPAN_DECLARE(int) v27ter_tx(v27ter_tx_state_t *s, int16_t amp[], int len)
 #endif
     int sample;
 
-    if (s->training_step >= V27TER_TRAINING_SHUTDOWN_END)
+    if (s->training_step >= (s->short_train ? V27TER_TRAINING_SHORT_SHUTDOWN_END : V27TER_TRAINING_SHUTDOWN_END))
     {
         /* Once we have sent the shutdown symbols, we stop sending completely. */
         return 0;
@@ -285,7 +296,10 @@ SPAN_DECLARE(int) v27ter_tx(v27ter_tx_state_t *s, int16_t amp[], int len)
             if (++s->baud_phase >= 5)
             {
                 s->baud_phase -= 5;
-                v = getbaud(s);;
+                v = getbaud(s);
+                if (s->is_shutdown)
+                    break;
+
                 s->rrc_filter_re[s->rrc_filter_step] = v.re;
                 s->rrc_filter_im[s->rrc_filter_step] = v.im;
                 if (++s->rrc_filter_step >= V27TER_TX_FILTER_STEPS)
@@ -323,6 +337,9 @@ SPAN_DECLARE(int) v27ter_tx(v27ter_tx_state_t *s, int16_t amp[], int len)
             {
                 s->baud_phase -= 20;
                 v = getbaud(s);
+                if (s->is_shutdown)
+                    break;
+
                 s->rrc_filter_re[s->rrc_filter_step] = v.re;
                 s->rrc_filter_im[s->rrc_filter_step] = v.im;
                 if (++s->rrc_filter_step >= V27TER_TX_FILTER_STEPS)
@@ -395,7 +412,7 @@ SPAN_DECLARE(logging_state_t *) v27ter_tx_get_logging_state(v27ter_tx_state_t *s
 }
 /*- End of function --------------------------------------------------------*/
 
-SPAN_DECLARE(int) v27ter_tx_restart(v27ter_tx_state_t *s, int bit_rate, bool tep)
+SPAN_DECLARE(int) v27ter_tx_restart(v27ter_tx_state_t *s, int bit_rate, bool tep, bool short_train)
 {
     if (bit_rate != 4800  &&  bit_rate != 2400)
         return -1;
@@ -412,7 +429,14 @@ SPAN_DECLARE(int) v27ter_tx_restart(v27ter_tx_state_t *s, int bit_rate, bool tep
     s->scramble_reg = 0x3C;
     s->scrambler_pattern_count = 0;
     s->in_training = true;
-    s->training_step = (tep)  ?  V27TER_TRAINING_SEG_1  :  V27TER_TRAINING_SEG_2;
+    s->is_shutdown = false;
+    s->short_train = short_train;
+
+    if (s->short_train)
+        s->training_step = (tep)  ?  V27TER_TRAINING_SHORT_SEG_1  :  V27TER_TRAINING_SHORT_SEG_2;
+    else
+        s->training_step = (tep)  ?  V27TER_TRAINING_SEG_1  :  V27TER_TRAINING_SEG_2;
+
     s->carrier_phase = 0;
     s->baud_phase = 0;
     s->constellation_state = 0;
@@ -421,7 +445,7 @@ SPAN_DECLARE(int) v27ter_tx_restart(v27ter_tx_state_t *s, int bit_rate, bool tep
 }
 /*- End of function --------------------------------------------------------*/
 
-SPAN_DECLARE(v27ter_tx_state_t *) v27ter_tx_init(v27ter_tx_state_t *s, int bit_rate, bool tep, span_get_bit_func_t get_bit, void *user_data)
+SPAN_DECLARE(v27ter_tx_state_t *) v27ter_tx_init(v27ter_tx_state_t *s, int bit_rate, bool tep, bool short_train, span_get_bit_func_t get_bit, void *user_data)
 {
     switch (bit_rate)
     {
@@ -446,7 +470,7 @@ SPAN_DECLARE(v27ter_tx_state_t *) v27ter_tx_init(v27ter_tx_state_t *s, int bit_r
     s->get_bit_user_data = user_data;
     s->carrier_phase_rate = dds_phase_ratef(CARRIER_NOMINAL_FREQ);
     v27ter_tx_power(s, -14.0f);
-    v27ter_tx_restart(s, bit_rate, tep);
+    v27ter_tx_restart(s, bit_rate, tep, short_train);
     return s;
 }
 /*- End of function --------------------------------------------------------*/

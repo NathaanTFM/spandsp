@@ -87,7 +87,7 @@ SPAN_DECLARE(void) v27ter_tx_power(v27ter_tx_state_t *s, float power);
     \param get_bit The callback routine used to get the data to be transmitted.
     \param user_data An opaque pointer.
     \return A pointer to the modem context, or NULL if there was a problem. */
-SPAN_DECLARE(v27ter_tx_state_t *) v27ter_tx_init(v27ter_tx_state_t *s, int bit_rate, bool tep, span_get_bit_func_t get_bit, void *user_data);
+SPAN_DECLARE(v27ter_tx_state_t *) v27ter_tx_init(v27ter_tx_state_t *s, int bit_rate, bool tep, bool short_train, span_get_bit_func_t get_bit, void *user_data);
 
 /*! Reinitialise an existing V.27ter modem transmit context, so it may be reused.
     \brief Reinitialise an existing V.27ter modem transmit context.
@@ -95,7 +95,7 @@ SPAN_DECLARE(v27ter_tx_state_t *) v27ter_tx_init(v27ter_tx_state_t *s, int bit_r
     \param bit_rate The bit rate of the modem. Valid values are 2400 and 4800.
     \param tep True is the optional TEP tone is to be transmitted.
     \return 0 for OK, -1 for bad parameter */
-SPAN_DECLARE(int) v27ter_tx_restart(v27ter_tx_state_t *s, int bit_rate, bool tep);
+SPAN_DECLARE(int) v27ter_tx_restart(v27ter_tx_state_t *s, int bit_rate, bool tep, bool short_train);
 
 /*! Release a V.27ter modem transmit context.
     \brief Release a V.27ter modem transmit context.

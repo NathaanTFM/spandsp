@@ -190,6 +190,16 @@ struct v27ter_rx_state_s
 
     /*! \brief Error and flow logging control */
     logging_state_t logging;
+
+    int short_train;
+    int short_train_detected;
+    bool training_succeeded;
+
+#if defined(SPANDSP_USE_FIXED_POINT)
+    int32_t training_error_save;
+#else
+    float training_error_save;
+#endif
 };
 
 #endif

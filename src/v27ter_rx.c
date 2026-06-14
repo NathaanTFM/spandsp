@@ -107,6 +107,11 @@
 /*! The length of training segment 6, in symbols */
 #define V27TER_TRAINING_SEG_6_LEN       8
 
+/* Segments of the short training sequence */
+#define V27TER_TRAINING_SHORT_SEG_3_LEN 14
+#define V27TER_TRAINING_SHORT_SEG_5_LEN 58
+#define V27TER_TRAINING_SHORT_SEG_6_LEN 8
+
 enum
 {
     TRAINING_STAGE_NORMAL_OPERATION = 0,
@@ -579,7 +584,7 @@ static __inline__ void process_half_baud(v27ter_rx_state_t *s, const complexf_t 
            Some modems are a bit wobbly when they start sending the signal. Also, we start
            this analysis before our filter buffers have completely filled. */
         target = &zero;
-        if (++s->training_count >= 30)
+        if (++s->training_count >= (s->training_succeeded ? 14 : 30))
         {
             s->gardner_step = 32;
             s->training_stage = TRAINING_STAGE_LOG_PHASE;
@@ -604,7 +609,8 @@ static __inline__ void process_half_baud(v27ter_rx_state_t *s, const complexf_t 
         ang = angle - s->last_angles[i & 1];
         s->last_angles[i & 1] = angle;
         s->diff_angles[i & 0xF] = s->diff_angles[(i - 2) & 0xF] + (ang >> 4);
-        if ((ang > DDS_PHASE(45.0f)  ||  ang < DDS_PHASE(-45.0f))  &&  s->training_count >= 13)
+
+        if ((ang > DDS_PHASE(45.0f)  ||  ang < DDS_PHASE(-45.0f))  &&  s->training_count >= (s->training_succeeded ? 7 : 13))
         {
             /* We seem to have a phase reversal */
             /* Slam the carrier frequency into line, based on the total phase drift over the last
@@ -663,6 +669,19 @@ static __inline__ void process_half_baud(v27ter_rx_state_t *s, const complexf_t 
             descramble(s, 1);
             s->constellation_state = abab_pos[s->training_bc];
             target = &v27ter_constellation[s->constellation_state];
+
+            if (s->short_train == 2) {
+                int nsymbols = s->training_count + (s->training_succeeded ? 4 : 30);
+                if (abs(nsymbols - V27TER_TRAINING_SHORT_SEG_3_LEN) < abs(nsymbols - V27TER_TRAINING_SEG_3_LEN)) {
+                    s->short_train_detected = 1;
+                } else {
+                    s->short_train_detected = 0;
+                }
+
+            } else {
+                s->short_train_detected = s->short_train;
+            }
+
             s->training_count = 1;
             s->training_stage = TRAINING_STAGE_TRAIN_ON_ABAB;
             report_status_change(s, SIG_STATUS_TRAINING_IN_PROGRESS);
@@ -695,7 +714,7 @@ static __inline__ void process_half_baud(v27ter_rx_state_t *s, const complexf_t 
         s->carrier_track_i = 400.0f + (200000.0f - 400.0f)*(float) (V27TER_TRAINING_SEG_5_LEN - s->training_count)/(float) V27TER_TRAINING_SEG_5_LEN;
         s->carrier_track_p = 1000000.0f + (10000000.0f - 1000000.0f)*(float) (V27TER_TRAINING_SEG_5_LEN - s->training_count)/(float) V27TER_TRAINING_SEG_5_LEN;
 #endif
-        if (++s->training_count >= V27TER_TRAINING_SEG_5_LEN)
+        if (++s->training_count >= (s->short_train_detected == 1 ? V27TER_TRAINING_SHORT_SEG_5_LEN : V27TER_TRAINING_SEG_5_LEN))
         {
             s->constellation_state = (s->bit_rate == 4800)  ?  4  :  2;
             s->training_count = 0;
@@ -715,7 +734,7 @@ static __inline__ void process_half_baud(v27ter_rx_state_t *s, const complexf_t 
         zz = complex_subf(&z, target);
         s->training_error += powerf(&zz);
 #endif
-        if (++s->training_count >= V27TER_TRAINING_SEG_6_LEN)
+        if (++s->training_count >= (s->short_train_detected == 1 ? V27TER_TRAINING_SHORT_SEG_6_LEN : V27TER_TRAINING_SEG_6_LEN))
         {
             /* At 4800bps the symbols are 1.08238 (Euclidian) apart.
                At 2400bps the symbols are 2.0 (Euclidian) apart. */
@@ -734,9 +753,17 @@ static __inline__ void process_half_baud(v27ter_rx_state_t *s, const complexf_t 
                    the processing. */
                 s->signal_present = (s->bit_rate == 4800)  ?  90  :  120;
                 s->training_stage = TRAINING_STAGE_NORMAL_OPERATION;
-                equalizer_save(s);
-                s->carrier_phase_rate_save = s->carrier_phase_rate;
-                s->agc_scaling_save = s->agc_scaling;
+
+                if (!s->training_succeeded || (s->training_error < s->training_error_save)) {
+                    equalizer_save(s);
+                    s->carrier_phase_rate_save = s->carrier_phase_rate;
+                    s->agc_scaling_save = s->agc_scaling;
+                    s->training_error_save = s->training_error;
+
+                    // this will enable short mode. do not enable short mode if we don't want to rx short train
+                    if (s->short_train != 0)
+                        s->training_succeeded = true;
+                }
             }
             else
             {
@@ -831,7 +858,7 @@ static __inline__ int signal_detect(v27ter_rx_state_t *s, int16_t amp)
             {
                 /* Count down a short delay, to ensure we push the last
                    few bits through the filters before stopping. */
-                v27ter_rx_restart(s, s->bit_rate, false);
+                v27ter_rx_restart(s, s->bit_rate, s->short_train, s->training_succeeded);
                 report_status_change(s, SIG_STATUS_CARRIER_DOWN);
                 return 0;
             }
@@ -1088,13 +1115,14 @@ SPAN_DECLARE(logging_state_t *) v27ter_rx_get_logging_state(v27ter_rx_state_t *s
 }
 /*- End of function --------------------------------------------------------*/
 
-SPAN_DECLARE(int) v27ter_rx_restart(v27ter_rx_state_t *s, int bit_rate, bool old_train)
+SPAN_DECLARE(int) v27ter_rx_restart(v27ter_rx_state_t *s, int bit_rate, int short_train, bool old_train)
 {
     span_log(&s->logging, SPAN_LOG_FLOW, "Restarting V.27ter\n");
     if (bit_rate != 4800  &&  bit_rate != 2400)
         return -1;
     /*endif*/
     s->bit_rate = bit_rate;
+    s->short_train = short_train;
 
 #if defined(SPANDSP_USE_FIXED_POINT)
     vec_zeroi16(s->rrc_filter, sizeof(s->rrc_filter)/sizeof(s->rrc_filter[0]));
@@ -1115,6 +1143,7 @@ SPAN_DECLARE(int) v27ter_rx_restart(v27ter_rx_state_t *s, int bit_rate, bool old
     s->low_samples = 0;
     s->carrier_drop_pending = false;
 #endif
+    s->old_train = old_train;
     vec_zeroi32(s->diff_angles, 16);
 
     s->carrier_phase = 0;
@@ -1137,6 +1166,7 @@ SPAN_DECLARE(int) v27ter_rx_restart(v27ter_rx_state_t *s, int bit_rate, bool old
     }
     else
     {
+        s->training_succeeded = false;
         s->carrier_phase_rate = DDS_PHASE_RATE(CARRIER_NOMINAL_FREQ);
 #if defined(SPANDSP_USE_FIXED_POINT)
         s->agc_scaling = (float) FP_SCALE(1.414f)*1024.0f/283.0f;
@@ -1151,14 +1181,14 @@ SPAN_DECLARE(int) v27ter_rx_restart(v27ter_rx_state_t *s, int bit_rate, bool old
 
     s->gardner_integrate = 0;
     s->total_baud_timing_correction = 0;
-    s->gardner_step = 512;
+    s->gardner_step = s->training_succeeded ? 128 : 512;
     s->baud_half = 0;
 
     return 0;
 }
 /*- End of function --------------------------------------------------------*/
 
-SPAN_DECLARE(v27ter_rx_state_t *) v27ter_rx_init(v27ter_rx_state_t *s, int bit_rate, span_put_bit_func_t put_bit, void *user_data)
+SPAN_DECLARE(v27ter_rx_state_t *) v27ter_rx_init(v27ter_rx_state_t *s, int bit_rate, int short_train, span_put_bit_func_t put_bit, void *user_data)
 {
     switch (bit_rate)
     {
@@ -1183,7 +1213,7 @@ SPAN_DECLARE(v27ter_rx_state_t *) v27ter_rx_init(v27ter_rx_state_t *s, int bit_r
     s->put_bit = put_bit;
     s->put_bit_user_data = user_data;
 
-    v27ter_rx_restart(s, bit_rate, false);
+    v27ter_rx_restart(s, bit_rate, short_train, false);
     return s;
 }
 /*- End of function --------------------------------------------------------*/
@@ -1207,4 +1237,10 @@ SPAN_DECLARE(void) v27ter_rx_set_qam_report_handler(v27ter_rx_state_t *s, qam_re
     s->qam_user_data = user_data;
 }
 /*- End of function --------------------------------------------------------*/
+
+SPAN_DECLARE(int) v27ter_rx_get_short_train(v27ter_rx_state_t *s)
+{
+    return s->short_train_detected;
+}
+
 /*- End of file ------------------------------------------------------------*/

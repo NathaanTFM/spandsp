@@ -68,7 +68,7 @@ extern "C"
     \param put_bit The callback routine used to put the received data.
     \param user_data An opaque pointer passed to the put_bit routine.
     \return A pointer to the modem context, or NULL if there was a problem. */
-SPAN_DECLARE(v27ter_rx_state_t *) v27ter_rx_init(v27ter_rx_state_t *s, int bit_rate, span_put_bit_func_t put_bit, void *user_data);
+SPAN_DECLARE(v27ter_rx_state_t *) v27ter_rx_init(v27ter_rx_state_t *s, int bit_rate, int short_train, span_put_bit_func_t put_bit, void *user_data);
 
 /*! Reinitialise an existing V.27ter modem receive context.
     \brief Reinitialise an existing V.27ter modem receive context.
@@ -76,7 +76,7 @@ SPAN_DECLARE(v27ter_rx_state_t *) v27ter_rx_init(v27ter_rx_state_t *s, int bit_r
     \param bit_rate The bit rate of the modem. Valid values are 2400 and 4800.
     \param old_train True if a previous trained values are to be reused.
     \return 0 for OK, -1 for bad parameter */
-SPAN_DECLARE(int) v27ter_rx_restart(v27ter_rx_state_t *s, int bit_rate, bool old_train);
+SPAN_DECLARE(int) v27ter_rx_restart(v27ter_rx_state_t *s, int bit_rate, int short_train, bool old_train);
 
 /*! Release a V.27ter modem receive context.
     \brief Release a V.27ter modem receive context.
@@ -163,6 +163,9 @@ SPAN_DECLARE(void) v27ter_rx_set_signal_cutoff(v27ter_rx_state_t *s, float cutof
     \param handler The handler routine.
     \param user_data An opaque pointer passed to the handler routine. */
 SPAN_DECLARE(void) v27ter_rx_set_qam_report_handler(v27ter_rx_state_t *s, qam_report_handler_t handler, void *user_data);
+
+
+SPAN_DECLARE(int) v27ter_rx_get_short_train(v27ter_rx_state_t *s);
 
 #if defined(__cplusplus)
 }

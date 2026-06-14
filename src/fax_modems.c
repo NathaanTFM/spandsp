@@ -407,7 +407,7 @@ SPAN_DECLARE(void) fax_modems_start_fast_modem(fax_modems_state_t *s, int which,
         switch (s->fast_modem)
         {
         case FAX_MODEM_V27TER_RX:
-            v27ter_rx_init(&s->fast_modems.v27ter_rx, s->bit_rate, put_bit, put_bit_user_data);
+            v27ter_rx_init(&s->fast_modems.v27ter_rx, s->bit_rate, 0, put_bit, put_bit_user_data);
             v27ter_rx_set_modem_status_handler(&s->fast_modems.v27ter_rx, v27ter_rx_status_handler, s);
             fax_modems_set_rx_handler(s, (span_rx_handler_t) &fax_modems_v27ter_v21_rx, s, (span_rx_fillin_handler_t) &fax_modems_v27ter_v21_rx_fillin, s);
             break;
@@ -423,7 +423,7 @@ SPAN_DECLARE(void) fax_modems_start_fast_modem(fax_modems_state_t *s, int which,
             fax_modems_set_rx_handler(s, (span_rx_handler_t) &fax_modems_v17_v21_rx, s, (span_rx_fillin_handler_t) &fax_modems_v17_v21_rx_fillin, s);
             break;
         case FAX_MODEM_V27TER_TX:
-            v27ter_tx_init(&s->fast_modems.v27ter_tx, s->bit_rate, s->use_tep, get_bit, get_bit_user_data);
+            v27ter_tx_init(&s->fast_modems.v27ter_tx, s->bit_rate, s->use_tep, false, get_bit, get_bit_user_data);
             fax_modems_set_tx_handler(s, (span_tx_handler_t) &v27ter_tx, &s->fast_modems.v27ter_tx);
             fax_modems_set_next_tx_handler(s, (span_tx_handler_t) NULL, NULL);
             break;
@@ -458,7 +458,7 @@ SPAN_DECLARE(void) fax_modems_start_fast_modem(fax_modems_state_t *s, int which,
         switch (s->fast_modem)
         {
         case FAX_MODEM_V27TER_RX:
-            v27ter_rx_restart(&s->fast_modems.v27ter_rx, s->bit_rate, false);
+            v27ter_rx_restart(&s->fast_modems.v27ter_rx, s->bit_rate, 0, false);
             v27ter_rx_set_put_bit(&s->fast_modems.v27ter_rx, put_bit, put_bit_user_data);
             v27ter_rx_set_modem_status_handler(&s->fast_modems.v27ter_rx, v27ter_rx_status_handler, s);
             fax_modems_set_rx_handler(s, (span_rx_handler_t) &fax_modems_v27ter_v21_rx, s, (span_rx_fillin_handler_t) &fax_modems_v27ter_v21_rx_fillin, s);
@@ -476,7 +476,7 @@ SPAN_DECLARE(void) fax_modems_start_fast_modem(fax_modems_state_t *s, int which,
             fax_modems_set_rx_handler(s, (span_rx_handler_t) &fax_modems_v17_v21_rx, s, (span_rx_fillin_handler_t) &fax_modems_v17_v21_rx_fillin, s);
             break;
         case FAX_MODEM_V27TER_TX:
-            v27ter_tx_restart(&s->fast_modems.v27ter_tx, s->bit_rate, s->use_tep);
+            v27ter_tx_restart(&s->fast_modems.v27ter_tx, s->bit_rate, s->use_tep, false);
             v27ter_tx_set_get_bit(&s->fast_modems.v27ter_tx, get_bit, get_bit_user_data);
             fax_modems_set_tx_handler(s, (span_tx_handler_t) &v27ter_tx, &s->fast_modems.v27ter_tx);
             fax_modems_set_next_tx_handler(s, (span_tx_handler_t) NULL, NULL);
