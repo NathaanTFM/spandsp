@@ -104,6 +104,11 @@
 /*! The length of training segment 4, in symbols */
 #define V29_TRAINING_SEG_4_LEN          48
 
+/* Segments of the short training sequence */
+#define V29_TRAINING_SHORT_SEG_2_LEN    100
+#define V29_TRAINING_SHORT_SEG_3_LEN    60
+#define V29_TRAINING_SHORT_SEG_4_LEN    20
+
 enum
 {
     TRAINING_STAGE_NORMAL_OPERATION = 0,
@@ -627,6 +632,21 @@ static void process_half_baud(v29_rx_state_t *s, complexf_t *sample)
             bit = scrambled_training_bit(s);
             s->constellation_state = cdcd_pos[s->training_cd + bit];
             target = &v29_9600_constellation[s->constellation_state];
+
+            if (s->short_train == 2) {
+                // If auto mode, try to figure out whether it's short train or not
+                // + 60 is expected but + 49 is closer to reality
+                int nsymbols = s->training_count + 49;
+                if (abs(nsymbols - V29_TRAINING_SHORT_SEG_2_LEN) < abs(nsymbols - V29_TRAINING_SEG_2_LEN)) {
+                    s->short_train_detected = 1;
+                } else {
+                    s->short_train_detected = 0;
+                }
+
+            } else {
+                s->short_train_detected = s->short_train;
+            }
+
             s->training_count = 1;
             s->training_stage = TRAINING_STAGE_TRAIN_ON_CDCD;
             report_status_change(s, SIG_STATUS_TRAINING_IN_PROGRESS);
@@ -653,7 +673,7 @@ static void process_half_baud(v29_rx_state_t *s, complexf_t *sample)
         target = &v29_9600_constellation[s->constellation_state];
         track_carrier(s, &z, target);
         tune_equalizer(s, &z, target);
-        if (++s->training_count >= V29_TRAINING_SEG_3_LEN - 48)
+        if (++s->training_count >= (s->short_train_detected == 1 ? V29_TRAINING_SHORT_SEG_3_LEN - 48 : V29_TRAINING_SEG_3_LEN - 48))
         {
             s->training_stage = TRAINING_STAGE_TRAIN_ON_CDCD_AND_TEST;
             s->training_error = FP_CONSTELLATION_SCALE(0.0f);
@@ -683,7 +703,7 @@ static void process_half_baud(v29_rx_state_t *s, complexf_t *sample)
         zz = complex_subf(&z, target);
         s->training_error += powerf(&zz);
 #endif
-        if (++s->training_count >= V29_TRAINING_SEG_3_LEN)
+        if (++s->training_count >= (s->short_train_detected == 1 ? V29_TRAINING_SHORT_SEG_3_LEN : V29_TRAINING_SEG_3_LEN))
         {
 #if defined(SPANDSP_USE_FIXED_POINT)
             span_log(&s->logging, SPAN_LOG_FLOW, "Constellation mismatch %d\n", s->training_error);
@@ -723,7 +743,7 @@ static void process_half_baud(v29_rx_state_t *s, complexf_t *sample)
         zz = complex_subf(&z, target);
         s->training_error += powerf(&zz);
 #endif
-        if (++s->training_count >= V29_TRAINING_SEG_4_LEN)
+        if (++s->training_count >= (s->short_train_detected == 1 ? V29_TRAINING_SHORT_SEG_4_LEN : V29_TRAINING_SEG_4_LEN))
         {
             if (s->training_error < FP_CONSTELLATION_SCALE(48.0f)*FP_CONSTELLATION_SCALE(1.0f))
             {
@@ -834,7 +854,7 @@ static __inline__ int signal_detect(v29_rx_state_t *s, int16_t amp)
             {
                 /* Count down a short delay, to ensure we push the last
                    few bits through the filters before stopping. */
-                v29_rx_restart(s, s->bit_rate, false);
+                v29_rx_restart(s, s->bit_rate, s->short_train, false);
                 report_status_change(s, SIG_STATUS_CARRIER_DOWN);
                 return 0;
             }
@@ -1016,7 +1036,7 @@ SPAN_DECLARE(logging_state_t *) v29_rx_get_logging_state(v29_rx_state_t *s)
 }
 /*- End of function --------------------------------------------------------*/
 
-SPAN_DECLARE(int) v29_rx_restart(v29_rx_state_t *s, int bit_rate, bool old_train)
+SPAN_DECLARE(int) v29_rx_restart(v29_rx_state_t *s, int bit_rate, int short_train, bool old_train)
 {
     switch (bit_rate)
     {
@@ -1034,6 +1054,8 @@ SPAN_DECLARE(int) v29_rx_restart(v29_rx_state_t *s, int bit_rate, bool old_train
     }
     /*endswitch*/
     s->bit_rate = bit_rate;
+
+    s->short_train = short_train;
 
 #if defined(SPANDSP_USE_FIXED_POINT)
     vec_zeroi16(s->rrc_filter, sizeof(s->rrc_filter)/sizeof(s->rrc_filter[0]));
@@ -1097,7 +1119,7 @@ SPAN_DECLARE(int) v29_rx_restart(v29_rx_state_t *s, int bit_rate, bool old_train
 }
 /*- End of function --------------------------------------------------------*/
 
-SPAN_DECLARE(v29_rx_state_t *) v29_rx_init(v29_rx_state_t *s, int bit_rate, span_put_bit_func_t put_bit, void *user_data)
+SPAN_DECLARE(v29_rx_state_t *) v29_rx_init(v29_rx_state_t *s, int bit_rate, int short_train, span_put_bit_func_t put_bit, void *user_data)
 {
     switch (bit_rate)
     {
@@ -1128,7 +1150,7 @@ SPAN_DECLARE(v29_rx_state_t *) v29_rx_init(v29_rx_state_t *s, int bit_rate, span
     /* The thresholds should be on at -26dBm0 and off at -31dBm0 */
     v29_rx_set_signal_cutoff(s, -28.5f);
 
-    v29_rx_restart(s, bit_rate, false);
+    v29_rx_restart(s, bit_rate, short_train, false);
     return s;
 }
 /*- End of function --------------------------------------------------------*/
@@ -1152,4 +1174,10 @@ SPAN_DECLARE(void) v29_rx_set_qam_report_handler(v29_rx_state_t *s, qam_report_h
     s->qam_user_data = user_data;
 }
 /*- End of function --------------------------------------------------------*/
+
+SPAN_DECLARE(int) v29_rx_get_short_train(v29_rx_state_t *s)
+{
+    return s->short_train_detected;
+}
+
 /*- End of file ------------------------------------------------------------*/

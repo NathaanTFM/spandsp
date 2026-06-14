@@ -97,6 +97,9 @@ struct v29_tx_state_s
     span_get_bit_func_t current_get_bit;
     /*! \brief Error and flow logging control */
     logging_state_t logging;
+
+    bool short_train;
+    bool is_shutdown;
 };
 
 #endif

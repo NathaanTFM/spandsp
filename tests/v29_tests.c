@@ -439,7 +439,7 @@ int main(int argc, char *argv[])
     else
     {
         /* We will generate V.29 audio, and add some noise to it. */
-        tx = v29_tx_init(NULL, test_bps, tep, v29getbit, NULL);
+        tx = v29_tx_init(NULL, test_bps, tep, false, v29getbit, NULL);
         logging = v29_tx_get_logging_state(tx);
         span_log_set_level(logging, SPAN_LOG_SHOW_SEVERITY | SPAN_LOG_SHOW_PROTOCOL | SPAN_LOG_FLOW);
         span_log_set_tag(logging, "V.29-tx");
@@ -463,7 +463,7 @@ int main(int argc, char *argv[])
     }
     /*endif*/
 
-    rx = v29_rx_init(NULL, test_bps, v29putbit, NULL);
+    rx = v29_rx_init(NULL, test_bps, 0, v29putbit, NULL);
     logging = v29_rx_get_logging_state(rx);
     span_log_set_level(logging, SPAN_LOG_SHOW_SEVERITY | SPAN_LOG_SHOW_PROTOCOL | SPAN_LOG_FLOW);
     span_log_set_tag(logging, "V.29-rx");
@@ -536,9 +536,9 @@ int main(int argc, char *argv[])
                 /*endif*/
                 memset(&latest_results, 0, sizeof(latest_results));
                 signal_level--;
-                v29_tx_restart(tx, test_bps, tep);
+                v29_tx_restart(tx, test_bps, tep, false);
                 v29_tx_power(tx, signal_level);
-                v29_rx_restart(rx, test_bps, false);
+                v29_rx_restart(rx, test_bps, 0, false);
 #if defined(SPANDSP_EXPOSE_INTERNAL_STRUCTURES)
                 rx->eq_put_step = rand()%(48*10/3);
 #endif

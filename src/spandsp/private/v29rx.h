@@ -175,6 +175,9 @@ struct v29_rx_state_s
 
     /*! \brief Error and flow logging control */
     logging_state_t logging;
+
+    int short_train;
+    int short_train_detected;
 };
 
 #endif

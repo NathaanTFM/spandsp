@@ -82,7 +82,7 @@
 /*! The start of the optional TEP, that may preceed the actual training, in symbols */
 #define V29_TRAINING_SEG_TEP        0
 /*! The start of training segment 1, in symbols */
-#define V29_TRAINING_SEG_1          (V29_TRAINING_SEG_TEP + 480)
+#define V29_TRAINING_SEG_1          (V29_TRAINING_SEG_TEP + 456)
 /*! The start of training segment 2, in symbols */
 #define V29_TRAINING_SEG_2          (V29_TRAINING_SEG_1 + 48)
 /*! The start of training segment 3, in symbols */
@@ -93,6 +93,15 @@
 #define V29_TRAINING_END            (V29_TRAINING_SEG_4 + 48)
 /*! The end of the shutdown sequence, in symbols */
 #define V29_TRAINING_SHUTDOWN_END   (V29_TRAINING_END + 32)
+
+/* Segments of the short training sequence */
+#define V29_TRAINING_SHORT_SEG_TEP      0
+#define V29_TRAINING_SHORT_SEG_1        (V29_TRAINING_SHORT_SEG_TEP + 0)
+#define V29_TRAINING_SHORT_SEG_2        (V29_TRAINING_SHORT_SEG_1 + 0)
+#define V29_TRAINING_SHORT_SEG_3        (V29_TRAINING_SHORT_SEG_2 + 100)
+#define V29_TRAINING_SHORT_SEG_4        (V29_TRAINING_SHORT_SEG_3 + 60)
+#define V29_TRAINING_SHORT_END          (V29_TRAINING_SHORT_SEG_4 + 20)
+#define V29_TRAINING_SHORT_SHUTDOWN_END (V29_TRAINING_SHORT_END + 32)
 
 static int fake_get_bit(void *user_data)
 {
@@ -149,17 +158,17 @@ static __inline__ complexf_t getbaud(v29_tx_state_t *s)
     if (s->in_training)
     {
         /* Send the training sequence */
-        if (++s->training_step <= V29_TRAINING_SEG_4)
+        if (++s->training_step <= (s->short_train ? V29_TRAINING_SHORT_SEG_4 : V29_TRAINING_SEG_4))
         {
-            if (s->training_step <= V29_TRAINING_SEG_3)
+            if (s->training_step <= (s->short_train ? V29_TRAINING_SHORT_SEG_3 : V29_TRAINING_SEG_3))
             {
-                if (s->training_step <= V29_TRAINING_SEG_1)
+                if (s->training_step <= (s->short_train ? V29_TRAINING_SHORT_SEG_1 : V29_TRAINING_SEG_1))
                 {
                     /* Optional segment: Unmodulated carrier (talker echo protection) */
                     return v29_9600_constellation[0];
                 }
                 /*endif*/
-                if (s->training_step <= V29_TRAINING_SEG_2)
+                if (s->training_step <= (s->short_train ? V29_TRAINING_SHORT_SEG_2 : V29_TRAINING_SEG_2))
                 {
                     /* Segment 1: silence */
                     return zero;
@@ -181,7 +190,7 @@ static __inline__ complexf_t getbaud(v29_tx_state_t *s)
         /* There is no graceful shutdown procedure defined for V.29. Just
            send some ones, to ensure we get the real data bits through, even
            with bad ISI. */
-        if (s->training_step == V29_TRAINING_END + 1)
+        if (s->training_step == (s->short_train ? V29_TRAINING_SHORT_END : V29_TRAINING_END) + 1)
         {
             /* Switch from the fake get_bit routine, to the user supplied real
                one, and we are up and running. */
@@ -189,8 +198,10 @@ static __inline__ complexf_t getbaud(v29_tx_state_t *s)
             s->in_training = false;
         }
         /*endif*/
-        if (s->training_step == V29_TRAINING_SHUTDOWN_END)
+        if (s->training_step == (s->short_train ? V29_TRAINING_SHORT_SHUTDOWN_END : V29_TRAINING_SHUTDOWN_END))
         {
+            s->is_shutdown = true;
+
             if (s->status_handler)
                 s->status_handler(s->status_user_data, SIG_STATUS_SHUTDOWN_COMPLETE);
             /*endif*/
@@ -238,7 +249,7 @@ SPAN_DECLARE(int) v29_tx(v29_tx_state_t *s, int16_t amp[], int len)
 #endif
     int sample;
 
-    if (s->training_step >= V29_TRAINING_SHUTDOWN_END)
+    if (s->training_step >= (s->short_train ? V29_TRAINING_SHORT_SHUTDOWN_END : V29_TRAINING_SHUTDOWN_END))
     {
         /* Once we have sent the shutdown symbols, we stop sending completely. */
         return 0;
@@ -250,6 +261,9 @@ SPAN_DECLARE(int) v29_tx(v29_tx_state_t *s, int16_t amp[], int len)
         {
             s->baud_phase -= 10;
             v = getbaud(s);
+            if (s->is_shutdown)
+                break;
+
             s->rrc_filter_re[s->rrc_filter_step] = v.re;
             s->rrc_filter_im[s->rrc_filter_step] = v.im;
             if (++s->rrc_filter_step >= V29_TX_FILTER_STEPS)
@@ -360,7 +374,7 @@ SPAN_DECLARE(logging_state_t *) v29_tx_get_logging_state(v29_tx_state_t *s)
 }
 /*- End of function --------------------------------------------------------*/
 
-SPAN_DECLARE(int) v29_tx_restart(v29_tx_state_t *s, int bit_rate, bool tep)
+SPAN_DECLARE(int) v29_tx_restart(v29_tx_state_t *s, int bit_rate, bool tep, bool short_train)
 {
     span_log(&s->logging, SPAN_LOG_FLOW, "Restarting V.29\n");
     s->bit_rate = bit_rate;
@@ -391,7 +405,14 @@ SPAN_DECLARE(int) v29_tx_restart(v29_tx_state_t *s, int bit_rate, bool tep)
     s->scramble_reg = 0;
     s->training_scramble_reg = 0x2A;
     s->in_training = true;
-    s->training_step = (tep)  ?  V29_TRAINING_SEG_TEP  :  V29_TRAINING_SEG_1;
+    s->is_shutdown = false;
+    s->short_train = short_train;
+
+    if (s->short_train)
+        s->training_step = (tep)  ?  V29_TRAINING_SHORT_SEG_TEP  :  V29_TRAINING_SHORT_SEG_1;
+    else
+        s->training_step = (tep)  ?  V29_TRAINING_SEG_TEP  :  V29_TRAINING_SEG_1;
+
     s->carrier_phase = 0;
     s->baud_phase = 0;
     s->constellation_state = 0;
@@ -400,7 +421,7 @@ SPAN_DECLARE(int) v29_tx_restart(v29_tx_state_t *s, int bit_rate, bool tep)
 }
 /*- End of function --------------------------------------------------------*/
 
-SPAN_DECLARE(v29_tx_state_t *) v29_tx_init(v29_tx_state_t *s, int bit_rate, bool tep, span_get_bit_func_t get_bit, void *user_data)
+SPAN_DECLARE(v29_tx_state_t *) v29_tx_init(v29_tx_state_t *s, int bit_rate, bool tep, bool short_train, span_get_bit_func_t get_bit, void *user_data)
 {
     switch (bit_rate)
     {
@@ -426,7 +447,7 @@ SPAN_DECLARE(v29_tx_state_t *) v29_tx_init(v29_tx_state_t *s, int bit_rate, bool
     s->get_bit_user_data = user_data;
     s->carrier_phase_rate = dds_phase_ratef(CARRIER_NOMINAL_FREQ);
     v29_tx_power(s, -14.0f);
-    v29_tx_restart(s, bit_rate, tep);
+    v29_tx_restart(s, bit_rate, tep, short_train);
     return s;
 }
 /*- End of function --------------------------------------------------------*/

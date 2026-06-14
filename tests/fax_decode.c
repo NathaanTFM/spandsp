@@ -1135,8 +1135,8 @@ int main(int argc, char *argv[])
     v17_12000 = v17_rx_init(NULL, 12000, v17_12000_put_bit, NULL);
     v17_9600 = v17_rx_init(NULL, 9600, v17_9600_put_bit, NULL);
     v17_7200 = v17_rx_init(NULL, 7200, v17_7200_put_bit, NULL);
-    v29_9600 = v29_rx_init(NULL, 9600, v29_9600_put_bit, NULL);
-    v29_7200 = v29_rx_init(NULL, 7200, v29_7200_put_bit, NULL);
+    v29_9600 = v29_rx_init(NULL, 9600, 0, v29_9600_put_bit, NULL);
+    v29_7200 = v29_rx_init(NULL, 7200, 0, v29_7200_put_bit, NULL);
     v27ter_4800 = v27ter_rx_init(NULL, 4800, v27ter_4800_put_bit, NULL);
     v27ter_2400 = v27ter_rx_init(NULL, 2400, v27ter_2400_put_bit, NULL);
 
