@@ -178,6 +178,14 @@ struct v29_rx_state_s
 
     int short_train;
     int short_train_detected;
+    bool training_succeeded;
+    bool agc_scaling_locked;
+
+#if defined(SPANDSP_USE_FIXED_POINT)
+    int32_t training_error_save;
+#else
+    float training_error_save;
+#endif
 };
 
 #endif

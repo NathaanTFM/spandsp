@@ -550,14 +550,14 @@ static void process_half_baud(v29_rx_state_t *s, complexf_t *sample)
             s->training_stage = TRAINING_STAGE_LOG_PHASE;
             vec_zeroi32(s->diff_angles, 16);
             s->last_angles[0] = arctan2(z.im, z.re);
-            if (s->agc_scaling_save == FP_SCALE(0.0f))
+            if (!s->agc_scaling_locked)
             {
 #if defined(SPANDSP_USE_FIXED_POINT)
                 span_log(&s->logging, SPAN_LOG_FLOW, "Locking AGC at %d\n", s->agc_scaling);
 #else
                 span_log(&s->logging, SPAN_LOG_FLOW, "Locking AGC at %f\n", s->agc_scaling);
 #endif
-                s->agc_scaling_save = s->agc_scaling;
+                s->agc_scaling_locked = true;
             }
             /*endif*/
         }
@@ -604,7 +604,7 @@ static void process_half_baud(v29_rx_state_t *s, complexf_t *sample)
             {
                 span_log(&s->logging, SPAN_LOG_FLOW, "Training failed (sequence failed)\n");
                 /* Park this modem */
-                s->agc_scaling_save = FP_SCALE(0.0f);
+                s->agc_scaling_locked = false;
                 s->training_stage = TRAINING_STAGE_PARKED;
                 report_status_change(s, SIG_STATUS_TRAINING_FAILED);
                 break;
@@ -659,7 +659,7 @@ static void process_half_baud(v29_rx_state_t *s, complexf_t *sample)
                of a real training sequence. */
             span_log(&s->logging, SPAN_LOG_FLOW, "Training failed (sequence failed)\n");
             /* Park this modem */
-            s->agc_scaling_save = FP_SCALE(0.0f);
+            s->agc_scaling_locked = false;
             s->training_stage = TRAINING_STAGE_PARKED;
             report_status_change(s, SIG_STATUS_TRAINING_FAILED);
         }
@@ -721,7 +721,7 @@ static void process_half_baud(v29_rx_state_t *s, complexf_t *sample)
             {
                 span_log(&s->logging, SPAN_LOG_FLOW, "Training failed (convergence failed)\n");
                 /* Park this modem */
-                s->agc_scaling_save = FP_SCALE(0.0f);
+                s->agc_scaling_locked = false;
                 s->training_stage = TRAINING_STAGE_PARKED;
                 report_status_change(s, SIG_STATUS_TRAINING_FAILED);
             }
@@ -758,9 +758,16 @@ static void process_half_baud(v29_rx_state_t *s, complexf_t *sample)
                    the processing. */
                 s->signal_present = 60;
                 s->training_stage = TRAINING_STAGE_NORMAL_OPERATION;
-                equalizer_save(s);
-                s->carrier_phase_rate_save = s->carrier_phase_rate;
-                s->agc_scaling_save = s->agc_scaling;
+
+                if (!s->training_succeeded || (s->training_error < s->training_error_save)) {
+                    equalizer_save(s);
+                    s->carrier_phase_rate_save = s->carrier_phase_rate;
+                    s->agc_scaling_save = s->agc_scaling;
+                    s->training_error_save = s->training_error;
+
+                    if (s->short_train != 0)
+                        s->training_succeeded = true;
+                }
             }
             else
             {
@@ -770,7 +777,7 @@ static void process_half_baud(v29_rx_state_t *s, complexf_t *sample)
 #else
                 span_log(&s->logging, SPAN_LOG_FLOW, "Training failed (constellation mismatch %f)\n", s->training_error);
 #endif
-                s->agc_scaling_save = FP_SCALE(0.0f);
+                s->agc_scaling_locked = false;
                 s->training_stage = TRAINING_STAGE_PARKED;
                 report_status_change(s, SIG_STATUS_TRAINING_FAILED);
             }
@@ -854,7 +861,7 @@ static __inline__ int signal_detect(v29_rx_state_t *s, int16_t amp)
             {
                 /* Count down a short delay, to ensure we push the last
                    few bits through the filters before stopping. */
-                v29_rx_restart(s, s->bit_rate, s->short_train, false);
+                v29_rx_restart(s, s->bit_rate, s->short_train, s->training_succeeded);
                 report_status_change(s, SIG_STATUS_CARRIER_DOWN);
                 return 0;
             }
@@ -940,7 +947,7 @@ SPAN_DECLARE(int) v29_rx(v29_rx_state_t *s, const int16_t amp[], int len)
         if (s->eq_put_step <= 0)
         {
             /* Only AGC until we have locked down the setting. */
-            if (s->agc_scaling_save == FP_SCALE(0.0f))
+            if (!s->agc_scaling_locked)
             {
                 if ((root_power = fixed_sqrt32(power)) == 0)
                     root_power = 1;
@@ -1088,12 +1095,14 @@ SPAN_DECLARE(int) v29_rx_restart(v29_rx_state_t *s, int bit_rate, int short_trai
         s->carrier_phase_rate = s->carrier_phase_rate_save;
         equalizer_restore(s);
         s->agc_scaling = s->agc_scaling_save;
+        s->agc_scaling_locked = (s->agc_scaling_save != FP_SCALE(0.0f));
     }
     else
     {
+        s->training_succeeded = false;
         s->carrier_phase_rate = DDS_PHASE_RATE(CARRIER_NOMINAL_FREQ);
         equalizer_reset(s);
-        s->agc_scaling_save = FP_SCALE(0.0f);
+        s->agc_scaling_locked = false;
 #if defined(SPANDSP_USE_FIXED_POINT)
         s->agc_scaling = (float) (FP_SCALE(1.25f)*1024.0f)/735.0f;
 #else
